@@ -13,7 +13,7 @@ class Controller(BaseHTTPRequestHandler):
     observed_status = {
       "configmaps": len(children["ConfigMap.v1"]),
       "services": len(children["Service.v1"]),
-      "ingress": len(children["Ingress.networking.k8s.io/v1beta1"]),
+      "ingress": len(children["Ingress.networking.k8s.io/v1"]),
       "pods": len(children["Pod.v1"])
     }
 
@@ -119,7 +119,7 @@ HTTPServer(("", 80), Controller).serve_forever()
 
   def create_ingress(self, parent, host):
     return {
-      "apiVersion": "networking.k8s.io/v1beta1",
+      "apiVersion": "networking.k8s.io/v1",
       "kind": "Ingress",
       "metadata": {
         "name": parent["metadata"]["name"],
@@ -137,9 +137,14 @@ HTTPServer(("", 80), Controller).serve_forever()
               "paths": [
                 {
                   "path": "/",
+                  "pathType": "Prefix",
                   "backend": {
-                    "serviceName": parent["metadata"]["name"],
-                    "servicePort": 80
+                    "service": {
+                        "name": parent["metadata"]["name"],
+                        "port": {
+                            "number": 80
+                        }
+                    }
                   }
                 }
               ]

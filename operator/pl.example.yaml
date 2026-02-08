@@ -1,0 +1,12 @@
+apiVersion: example.com/v1
+kind: PythonLambda
+metadata:
+  name: demo-python-lambda
+  namespace: python-lambda-operator
+spec:
+  code: |
+    name = query_params.get("name", ["World"])[0]
+    reverse_name = name[::-1]
+    output = "Hello %s! Your name in reverse is %s" % (name, reverse_name)    
+  replicas: 2
+  host: example.com

@@ -1,65 +1,62 @@
 apiVersion: v1
 data:
-  sync.py: "from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer\r\nimport
-    json\r\n\r\nclass Controller(BaseHTTPRequestHandler):\r\n  def sync(self, parent,
-    children):\r\n    # get parent specs\r\n    spec = parent.get(\"spec\", {})\r\n
-    \   lambda_code = spec.get(\"code\", \"\")\r\n    replicas = spec.get(\"replicas\",
-    1)\r\n    host = spec.get(\"host\", \"localhost\")\r\n\r\n    # Compute status
-    based on observed state.\r\n    observed_status = {\r\n      \"configmaps\": len(children[\"ConfigMap.v1\"]),\r\n
-    \     \"services\": len(children[\"Service.v1\"]),\r\n      \"ingress\": len(children[\"Ingress.networking.k8s.io/v1beta1\"]),\r\n
-    \     \"pods\": len(children[\"Pod.v1\"])\r\n    }\r\n\r\n    # Generate the desired
-    child object(s).\r\n    desired_children = [self.create_config_map(parent, lambda_code)]\r\n
-    \   desired_children.append(self.create_service(parent))\r\n    desired_children.append(self.create_ingress(parent,
-    host))\r\n    for i in range(replicas):\r\n      desired_children.append(self.create_pod(parent,
-    i))\r\n\r\n    return {\"status\": observed_status, \"children\": desired_children}\r\n\r\n
-    \ def create_config_map(self, parent, lambda_code):\r\n    indented_code = map(lambda
-    line: \"    \" + line, lambda_code.split('\\n'))\r\n    lambda_code = '\\n'.join(indented_code)\r\n
-    \   return {\r\n      \"apiVersion\": \"v1\",\r\n      \"kind\": \"ConfigMap\",\r\n
-    \     \"metadata\": {\r\n        \"name\": parent[\"metadata\"][\"name\"]\r\n
-    \     },\r\n      \"data\": {\r\n        \"script.py\": \"\"\"\r\nfrom BaseHTTPServer
-    import BaseHTTPRequestHandler, HTTPServer\r\nimport urlparse\r\n          \r\nclass
-    Controller(BaseHTTPRequestHandler):\r\n  def do_GET(self):\r\n    query_params
-    = urlparse.parse_qs(urlparse.urlparse(self.path).query)\r\n  \r\n    output =
-    \"\"\r\n    \r\n    # Begin lambda\r\n%s\r\n    # End lambda\r\n    \r\n    if
-    output == \"\":\r\n      output = \"Lambda output was empty\"\r\n    \r\n    self.send_response(200)\r\n
-    \   self.end_headers()\r\n    self.wfile.write(output)\r\n        \r\nHTTPServer((\"\",
-    80), Controller).serve_forever()\r\n        \"\"\" % lambda_code\r\n      }\r\n
-    \   }\r\n\r\n  def create_pod(self, parent, i):\r\n    return {\r\n      \"apiVersion\":
-    \"v1\",\r\n      \"kind\": \"Pod\",\r\n      \"metadata\": {\r\n        \"name\":
-    \"%s-%s\" % (parent[\"metadata\"][\"name\"], i),\r\n        \"labels\": {\r\n
-    \         \"app\": parent[\"metadata\"][\"name\"]\r\n        }\r\n      },\r\n
-    \     \"spec\": {\r\n        \"restartPolicy\": \"OnFailure\",\r\n        \"containers\":
-    [\r\n          {\r\n            \"name\": \"hello\",\r\n            \"image\":
-    \"python:2.7\",\r\n            \"command\": [\"python\", \"/scripts/script.py\"],\r\n
-    \           \"volumeMounts\": [\r\n              {\r\n                \"name\":
-    \"script\",\r\n                \"mountPath\": \"/scripts\"\r\n              }\r\n
-    \           ]\r\n          }\r\n        ],\r\n        \"volumes\": [\r\n          {\r\n
-    \           \"name\": \"script\",\r\n            \"configMap\": {\r\n              \"name\":
-    parent[\"metadata\"][\"name\"]\r\n            }\r\n          }\r\n        ]\r\n
-    \     }\r\n    }\r\n\r\n  def create_service(self, parent):\r\n    return {\r\n
-    \     \"apiVersion\": \"v1\",\r\n      \"kind\": \"Service\",\r\n      \"metadata\":
-    {\r\n        \"name\": parent[\"metadata\"][\"name\"]\r\n      },\r\n      \"spec\":
-    {\r\n        \"selector\": {\r\n          \"app\": parent[\"metadata\"][\"name\"]\r\n
-    \       },\r\n        \"ports\": [\r\n          {\r\n            \"port\": 80\r\n
-    \         }\r\n        ]\r\n      }\r\n    }\r\n\r\n  def create_ingress(self,
-    parent, host):\r\n    return {\r\n      \"apiVersion\": \"networking.k8s.io/v1beta1\",\r\n
-    \     \"kind\": \"Ingress\",\r\n      \"metadata\": {\r\n        \"name\": parent[\"metadata\"][\"name\"],\r\n
-    \       \"annotations\": {\r\n          \"kubernetes.io/ingress.class\": \"nginx\",\r\n
-    \         \"kubernetes.io/tls-acme\": \"true\",\r\n          \"cert-manager.io/cluster-issuer\":
-    \"letsencrypt-staging-issuer\"\r\n        }\r\n      },\r\n      \"spec\": {\r\n
-    \       \"rules\": [\r\n          {\r\n            \"host\": host,\r\n            \"http\":
-    {\r\n              \"paths\": [\r\n                {\r\n                  \"path\":
-    \"/\",\r\n                  \"backend\": {\r\n                    \"serviceName\":
-    parent[\"metadata\"][\"name\"],\r\n                    \"servicePort\": 80\r\n
-    \                 }\r\n                }\r\n              ]\r\n            }\r\n
-    \         },\r\n        ],\r\n        \"tls\": [\r\n          {\r\n            \"hosts\":
-    [host],\r\n            \"secretName\": \"%s-%s\" % (parent[\"metadata\"][\"name\"],
-    \"tls-secret\")\r\n          }\r\n        ]\r\n      }\r\n    }\r\n\r\n  def do_POST(self):\r\n
-    \   # Serve the sync() function as a JSON webhook.\r\n    observed = json.loads(self.rfile.read(int(self.headers.getheader(\"content-length\"))))\r\n
-    \   desired = self.sync(observed[\"parent\"], observed[\"children\"])\r\n\r\n
-    \   self.send_response(200)\r\n    self.send_header(\"Content-type\", \"application/json\")\r\n
-    \   self.end_headers()\r\n    self.wfile.write(json.dumps(desired))\r\n\r\nHTTPServer((\"\",
-    80), Controller).serve_forever()\r\n"
+  sync.py: "from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer\nimport
+    json\n\nclass Controller(BaseHTTPRequestHandler):\n  def sync(self, parent, children):\n
+    \   # get parent specs\n    spec = parent.get(\"spec\", {})\n    lambda_code =
+    spec.get(\"code\", \"\")\n    replicas = spec.get(\"replicas\", 1)\n    host =
+    spec.get(\"host\", \"localhost\")\n\n    # Compute status based on observed state.\n
+    \   observed_status = {\n      \"configmaps\": len(children[\"ConfigMap.v1\"]),\n
+    \     \"services\": len(children[\"Service.v1\"]),\n      \"ingress\": len(children[\"Ingress.networking.k8s.io/v1\"]),\n
+    \     \"pods\": len(children[\"Pod.v1\"])\n    }\n\n    # Generate the desired
+    child object(s).\n    desired_children = [self.create_config_map(parent, lambda_code)]\n
+    \   desired_children.append(self.create_service(parent))\n    desired_children.append(self.create_ingress(parent,
+    host))\n    for i in range(replicas):\n      desired_children.append(self.create_pod(parent,
+    i))\n\n    return {\"status\": observed_status, \"children\": desired_children}\n\n
+    \ def create_config_map(self, parent, lambda_code):\n    indented_code = map(lambda
+    line: \"    \" + line, lambda_code.split('\\n'))\n    lambda_code = '\\n'.join(indented_code)\n
+    \   return {\n      \"apiVersion\": \"v1\",\n      \"kind\": \"ConfigMap\",\n
+    \     \"metadata\": {\n        \"name\": parent[\"metadata\"][\"name\"]\n      },\n
+    \     \"data\": {\n        \"script.py\": \"\"\"\nfrom BaseHTTPServer import BaseHTTPRequestHandler,
+    HTTPServer\nimport urlparse\n          \nclass Controller(BaseHTTPRequestHandler):\n
+    \ def do_GET(self):\n    query_params = urlparse.parse_qs(urlparse.urlparse(self.path).query)\n
+    \ \n    output = \"\"\n    \n    # Begin lambda\n%s\n    # End lambda\n    \n
+    \   if output == \"\":\n      output = \"Lambda output was empty\"\n    \n    self.send_response(200)\n
+    \   self.end_headers()\n    self.wfile.write(output)\n        \nHTTPServer((\"\",
+    80), Controller).serve_forever()\n        \"\"\" % lambda_code\n      }\n    }\n\n
+    \ def create_pod(self, parent, i):\n    return {\n      \"apiVersion\": \"v1\",\n
+    \     \"kind\": \"Pod\",\n      \"metadata\": {\n        \"name\": \"%s-%s\" %
+    (parent[\"metadata\"][\"name\"], i),\n        \"labels\": {\n          \"app\":
+    parent[\"metadata\"][\"name\"]\n        }\n      },\n      \"spec\": {\n        \"restartPolicy\":
+    \"OnFailure\",\n        \"containers\": [\n          {\n            \"name\":
+    \"hello\",\n            \"image\": \"python:2.7\",\n            \"command\": [\"python\",
+    \"/scripts/script.py\"],\n            \"volumeMounts\": [\n              {\n                \"name\":
+    \"script\",\n                \"mountPath\": \"/scripts\"\n              }\n            ]\n
+    \         }\n        ],\n        \"volumes\": [\n          {\n            \"name\":
+    \"script\",\n            \"configMap\": {\n              \"name\": parent[\"metadata\"][\"name\"]\n
+    \           }\n          }\n        ]\n      }\n    }\n\n  def create_service(self,
+    parent):\n    return {\n      \"apiVersion\": \"v1\",\n      \"kind\": \"Service\",\n
+    \     \"metadata\": {\n        \"name\": parent[\"metadata\"][\"name\"]\n      },\n
+    \     \"spec\": {\n        \"selector\": {\n          \"app\": parent[\"metadata\"][\"name\"]\n
+    \       },\n        \"ports\": [\n          {\n            \"port\": 80\n          }\n
+    \       ]\n      }\n    }\n\n  def create_ingress(self, parent, host):\n    return
+    {\n      \"apiVersion\": \"networking.k8s.io/v1\",\n      \"kind\": \"Ingress\",\n
+    \     \"metadata\": {\n        \"name\": parent[\"metadata\"][\"name\"],\n        \"annotations\":
+    {\n          \"kubernetes.io/ingress.class\": \"nginx\",\n          \"kubernetes.io/tls-acme\":
+    \"true\",\n          \"cert-manager.io/cluster-issuer\": \"letsencrypt-staging-issuer\"\n
+    \       }\n      },\n      \"spec\": {\n        \"rules\": [\n          {\n            \"host\":
+    host,\n            \"http\": {\n              \"paths\": [\n                {\n
+    \                 \"path\": \"/\",\n                  \"pathType\": \"Prefix\",\n
+    \                 \"backend\": {\n                    \"service\": {\n                        \"name\":
+    parent[\"metadata\"][\"name\"],\n                        \"port\": {\n                            \"number\":
+    80\n                        }\n                    }\n                  }\n                }\n
+    \             ]\n            }\n          },\n        ],\n        \"tls\": [\n
+    \         {\n            \"hosts\": [host],\n            \"secretName\": \"%s-%s\"
+    % (parent[\"metadata\"][\"name\"], \"tls-secret\")\n          }\n        ]\n      }\n
+    \   }\n\n  def do_POST(self):\n    # Serve the sync() function as a JSON webhook.\n
+    \   observed = json.loads(self.rfile.read(int(self.headers.getheader(\"content-length\"))))\n
+    \   desired = self.sync(observed[\"parent\"], observed[\"children\"])\n\n    self.send_response(200)\n
+    \   self.send_header(\"Content-type\", \"application/json\")\n    self.end_headers()\n
+    \   self.wfile.write(json.dumps(desired))\n\nHTTPServer((\"\", 80), Controller).serve_forever()"
 kind: ConfigMap
 metadata:
   creationTimestamp: null

@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: python-lambda-operator
+---
+apiVersion: metacontroller.k8s.io/v1alpha1
+kind: CompositeController
+metadata:
+  name: python-lambda-operator
+  namespace: python-lambda-operator
+spec:
+  generateSelector: true
+  parentResource:
+    apiVersion: example.com/v1
+    resource: pythonlambdas
+  childResources:
+  - apiVersion: v1
+    resource: configmaps
+    updateStrategy:
+      method: Recreate
+  - apiVersion: v1
+    resource: services
+    updateStrategy:
+      method: Recreate
+  - apiVersion: networking.k8s.io/v1
+    resource: ingresses
+    updateStrategy:
+      method: InPlace
+  - apiVersion: v1
+    resource: pods
+    updateStrategy:
+      method: Recreate
+  hooks:
+    sync:
+      webhook:
+        url: http://webhook-python-lambda-operator.python-lambda-operator/sync
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook-python-lambda-operator
+  namespace: python-lambda-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webhook-python-lambda-operator
+  template:
+    metadata:
+      labels:
+        app: webhook-python-lambda-operator
+    spec:
+      containers:
+      - name: controller
+        image: python:2.7
+        command: ["python", "/hooks/sync.py"]
+        volumeMounts:
+        - name: hooks
+          mountPath: /hooks
+      volumes:
+      - name: hooks
+        configMap:
+          name: webhook-python-lambda-operator
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhook-python-lambda-operator
+  namespace: python-lambda-operator
+spec:
+  selector:
+    app: webhook-python-lambda-operator
+  ports:
+    - port: 80
